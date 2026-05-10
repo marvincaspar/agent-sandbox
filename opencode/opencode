@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# inspired by https://github.com/cjermain/pi-less-yolo/
-
-# Wrapper script to run the pi coding agent inside a Docker container.
+# Wrapper script to run the opencode coding agent inside a Docker container.
 # Supports an optional --build flag to rebuild the image before running.
 
-readonly PI_IMAGE='pi-yolo'
+readonly OPENCODE_IMAGE='opencode-yolo'
 readonly LANGS=(base go php8.4 php8.5)
 
 function check_docker() {
@@ -23,27 +21,25 @@ function check_docker() {
 function script_usage() {
     cat << EOF
 Usage:
-    pi [OPTIONS] [PI_ARGS...]
-    pi [OPTIONS] -- [PI_ARGS...]
 
 Options:
     -h|--help       Displays this help
     -b|--build      Rebuild the Docker image before running
 
-Any unrecognised options and arguments are forwarded to the pi agent.
-Use '--' to pass flags to pi that would otherwise conflict with this script.
+Any unrecognised options and arguments are forwarded to the opencode agent.
+Use '--' to pass flags to opencode that would otherwise conflict with this script.
 EOF
 }
 
 
 function build_image() {
-    echo "Building Docker image: ${PI_IMAGE} ..." >&2
+    echo "Building Docker image: ${OPENCODE_IMAGE} ..." >&2
     for target in "${LANGS[@]}"; do
         echo "Building target stage: ${target} ..." >&2
         docker buildx build \
             --file "${script_home}/Dockerfile" \
             --target "${target}" \
-            --tag "${PI_IMAGE}:${target}" \
+            --tag "${OPENCODE_IMAGE}:${target}" \
             "${script_home}" >&2
     done
 }
@@ -67,12 +63,12 @@ function parse_params() {
                 shift
                 ;;
             --)
-                # Everything after -- is forwarded verbatim to pi
-                pi_passthrough+=("$@")
+                # Everything after -- is forwarded verbatim to opencode
+                opencode_passthrough+=("$@")
                 return
                 ;;
             *)
-                pi_passthrough+=("${param}")
+                opencode_passthrough+=("${param}")
                 ;;
         esac
     done
@@ -87,14 +83,14 @@ function main() {
 
     build=false
     lang="base"
-    pi_passthrough=()
+    opencode_passthrough=()
 
     parse_params "$@"
 
     if [[ "${build}" == true ]]; then
         build_image
-    elif ! docker image inspect "${PI_IMAGE}" &>/dev/null; then
-        echo "Image '${PI_IMAGE}' not found. Building it first..." >&2
+    elif ! docker image inspect "${OPENCODE_IMAGE}" &>/dev/null; then
+        echo "Image '${OPENCODE_IMAGE}' not found. Building it first..." >&2
         build_image
     fi
 
@@ -103,7 +99,7 @@ function main() {
         exit 1
     fi
 
-    echo "Running pi in Docker container '${PI_IMAGE}' with language target '${lang}'..." >&2
+    echo "Running opencode in Docker container '${OPENCODE_IMAGE}' with language target '${lang}'..." >&2
 
     local docker_flags=(
         '--rm'
@@ -114,41 +110,14 @@ function main() {
         '--security-opt=no-new-privileges'
         '--ipc=private'
         '--mount' "type=bind,source=$(pwd),target=$(pwd)"
-        '--volume' "${HOME}/.pi/agent:/pi-agent"
-        '--volume' "${HOME}/.agents/skills:/home/piuser/.agents/skills"
+        '--volume' "${HOME}/.config/opencode:/home/opencodeuser/.config/opencode"
         '--workdir' "$(pwd)"
-        '--env' "PI_CODING_AGENT_DIR=/pi-agent"
         '--env' "TERM=${TERM:-xterm-256color}"
         '--env' "COLORTERM=${COLORTERM:-truecolor}"
-        '--env' "PI_TELEMETRY=${PI_TELEMETRY:-false}"
     )
 
-    # Forward pi-related env vars and API keys if set on the host.
-    # Auth file (~/.pi/agent/auth.json) takes priority over these if present.
-    local pi_env_vars=(
-        PI_SKIP_VERSION_CHECK
-        PI_CACHE_RETENTION
-        PI_PACKAGE_DIR
-        VISUAL
-        EDITOR
-        ANTHROPIC_API_KEY
-        OPENAI_API_KEY
-        GEMINI_API_KEY
-        OPENCODE_API_KEY
-    )
-    local var
-    for var in "${pi_env_vars[@]}"; do
-        [[ -n "${!var:-}" ]] && docker_flags+=('--env' "${var}=${!var}")
-    done
-
-
-    local pi_args=(
-        '--append-system-prompt'
-        'You are running inside a Docker container as a non-root user. No Docker socket, sudo, or system package installation (apk requires root) is available.'
-    )
-
-    docker run "${docker_flags[@]}" "${PI_IMAGE}:${lang}"  "${pi_args[@]}" \
-        "${pi_passthrough[@]+"${pi_passthrough[@]}"}"
+    docker run "${docker_flags[@]}" "${OPENCODE_IMAGE}:${lang}" \
+        "${opencode_passthrough[@]+"${opencode_passthrough[@]}"}"
 }
 
 main "$@"

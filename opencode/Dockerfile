@@ -8,29 +8,23 @@ RUN apk add --no-cache \
         ca-certificates \
         git
 
-# Install pi globally
+# Install opencode globally
 RUN echo "ignore-scripts=true" > ~/.npmrc \
-    && npm add -g "@earendil-works/pi-coding-agent@0.74.0"
+    && npm i -g opencode-ai@1.14.48
 
-# Prepend extension binaries (host-mounted via /pi-agent). Security: binaries
-# here can shadow any command; no privilege escalation (--cap-drop=ALL,
-# --no-new-privileges), but review ~/.pi/agent/npm-global/bin/ after installs.
-ENV PATH="/pi-agent/npm-global/bin:${PATH}"
-
-# /home/piuser: world-writable (1777) so any runtime UID can write here.
+# /home/opencodeuser: world-writable (1777) so any runtime UID can write here.
 #   read mounts inside it (700 would block a non-matching UID).
 # /etc/passwd: world-writable so the entrypoint can add the runtime UID.
-# .npmrc sets prefix=/pi-agent/npm-global so extensions persist across restarts.
-# Written as a literal file because ENV HOME is not yet set to /home/piuser.
-RUN mkdir -p /home/piuser \
-    && chmod 1777 /home/piuser \
-    && chmod a+w /etc/passwd \
-    && echo "prefix=/pi-agent/npm-global" > /home/piuser/.npmrc
+# .npmrc sets prefix=/opencode-agent/npm-global so extensions persist across restarts.
+# Written as a literal file because ENV HOME is not yet set to /home/opencodeuser.
+RUN mkdir -p /home/opencodeuser \
+    && chmod 1777 /home/opencodeuser \
+    && chmod a+w /etc/passwd
 
-ENV HOME=/home/piuser
-WORKDIR /home/piuser
+ENV HOME=/home/opencodeuser
+WORKDIR /home/opencodeuser
 
-# Register the runtime UID in /etc/passwd before starting pi.
+# Register the runtime UID in /etc/passwd before starting opencode.
 # getpwuid(3) must resolve the runtime UID; nss_wrapper is
 # unavailable in Wolfi so we append directly.
 RUN <<'EOF'
@@ -39,14 +33,14 @@ cat > /usr/local/bin/entrypoint.sh << 'ENTRYPOINT'
 set -e
 
 if ! grep -q "^[^:]*:[^:]*:$(id -u):" /etc/passwd; then
-    printf 'piuser:x:%d:%d:piuser:%s:/bin/sh\n' \
+    printf 'opencodeuser:x:%d:%d:opencodeuser:%s:/bin/sh\n' \
         "$(id -u)" "$(id -g)" "${HOME}" >> /etc/passwd
 fi
 
-# Pass through to a shell when invoked via `pi:shell`; otherwise run pi.
+# Pass through to a shell when invoked via `opencode:shell`; otherwise run opencode.
 case "${1:-}" in
     bash|sh) exec "$@" ;;
-    *) exec pi "$@" ;;
+    *) exec opencode "$@" ;;
 esac
 ENTRYPOINT
 chmod +x /usr/local/bin/entrypoint.sh
