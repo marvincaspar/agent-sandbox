@@ -1,17 +1,16 @@
 # Getting newest sha256 digest for cgr.dev/chainguard/node:latest-dev on 2025-05-08:
 # $ docker buildx imagetools inspect cgr.dev/chainguard/node:latest-dev
-FROM cgr.dev/chainguard/node:latest-dev@sha256:704e0edd9d3e701c09afabafa31a6ecc594876c1e63046c1715f71435119df50
+FROM cgr.dev/chainguard/node:latest-dev@sha256:704e0edd9d3e701c09afabafa31a6ecc594876c1e63046c1715f71435119df50 AS base
 
 USER root
 RUN apk add --no-cache \
         curl \
         ca-certificates \
-        git \
-        go-1.26 \
-        php-8.4
+        git
 
 # Install pi globally
-RUN npm install -g "@mariozechner/pi-coding-agent@0.73.1"
+RUN echo "ignore-scripts=true" > ~/.npmrc
+RUN npm add -g "@earendil-works/pi-coding-agent"
 
 # Prepend extension binaries (host-mounted via /pi-agent). Security: binaries
 # here can shadow any command; no privilege escalation (--cap-drop=ALL,
@@ -54,3 +53,18 @@ chmod +x /usr/local/bin/entrypoint.sh
 EOF
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+FROM base AS go
+
+USER root
+RUN apk add --no-cache go-1.26
+
+FROM base AS php8.4
+
+USER root
+RUN apk add --no-cache php-8.4
+
+FROM base AS php8.5
+
+USER root
+RUN apk add --no-cache php-8.5

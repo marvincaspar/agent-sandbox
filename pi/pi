@@ -6,7 +6,7 @@ set -euo pipefail
 # Wrapper script to run the pi coding agent inside a Docker container.
 # Supports an optional --build flag to rebuild the image before running.
 
-readonly PI_IMAGE='pi-yolo:latest'
+readonly PI_IMAGE='pi-yolo'
 
 function check_docker() {
     if ! command -v docker &>/dev/null; then
@@ -37,10 +37,14 @@ EOF
 
 function build_image() {
     echo "Building Docker image: ${PI_IMAGE} ..." >&2
-    docker buildx build \
-        --file "${script_home}/Dockerfile" \
-        --tag "${PI_IMAGE}" \
-        "${script_home}" >&2
+    for target in base go php8.4 php8.5; do
+        echo "Building target stage: ${target} ..." >&2
+        docker buildx build \
+            --file "${script_home}/Dockerfile" \
+            --target "${target}" \
+            --tag "${PI_IMAGE}:${target}" \
+            "${script_home}" >&2
+    done
 }
 
 
@@ -56,6 +60,10 @@ function parse_params() {
                 ;;
             -b | --build)
                 build=true
+                ;;
+            -l | --lang)
+                lang="$1"
+                shift
                 ;;
             --)
                 # Everything after -- is forwarded verbatim to pi
@@ -77,6 +85,7 @@ function main() {
     script_home=$(dirname "$(realpath "$0")")
 
     build=false
+    lang="base"
     pi_passthrough=()
 
     parse_params "$@"
@@ -87,6 +96,8 @@ function main() {
         echo "Image '${PI_IMAGE}' not found. Building it first..." >&2
         build_image
     fi
+
+    echo "Running pi in Docker container '${PI_IMAGE}' with language target '${lang}'..." >&2
 
     local docker_flags=(
         '--rm'
@@ -130,7 +141,7 @@ function main() {
         'You are running inside a Docker container as a non-root user. No Docker socket, sudo, or system package installation (apk requires root) is available.'
     )
 
-    docker run "${docker_flags[@]}" "${PI_IMAGE}" "${pi_args[@]}" \
+    docker run "${docker_flags[@]}" "${PI_IMAGE}:${lang}"  "${pi_args[@]}" \
         "${pi_passthrough[@]+"${pi_passthrough[@]}"}"
 }
 
