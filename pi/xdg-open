@@ -1,0 +1,7 @@
+#!/bin/sh
+echo "$1" > /tmp/oauth-url.txt
+echo ""
+echo "=== OPEN THIS URL IN YOUR HOST BROWSER ==="
+echo "$1"
+echo "=========================================="
+echo ""

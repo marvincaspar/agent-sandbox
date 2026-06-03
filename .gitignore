@@ -1,1 +1,10 @@
 .vscode
+
+/pi/.context-mode
+/pi/acli
+/pi/agent/auth.json
+/pi/agent/bin
+!/pi/agent/bin/jira_acli
+/pi/agent/npm
+/pi/agent/sessions
+/tasks

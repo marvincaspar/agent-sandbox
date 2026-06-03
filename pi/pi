@@ -1,12 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# inspired by https://github.com/cjermain/pi-less-yolo/
-
-# Wrapper script to run the pi coding agent inside a Docker container.
-# Supports an optional --build flag to rebuild the image before running.
+# Wrapper script to run the pi coding agent inside a hardened Docker container.
+#
+# Features:
+#   - Multi-language targets: base, go, php8.4, php8.5 (--lang)
+#   - Optional image rebuild before running (--build)
+#   - Optional tinyproxy sidecar for restricted outbound network access (--proxy)
+#     with a configurable allowed-domains allowlist (--allowed-domains)
+#   - Isolated internal Docker network when proxy is active
+#   - Hardened container: capabilities dropped, no-new-privileges, private IPC
+#   - Mounts current working directory, ~/.pi/agent, dotfiles, skills, and
+#     ~/.config/acli read-write; entrypoint and xdg-open shim mounted read-only
+#   - Forwards common API keys and pi env-vars from the host environment
+#   - Passes a system prompt informing pi it is running as a non-root Docker user
+#   - Any unrecognised arguments are forwarded verbatim to pi (use '--' to avoid
+#     flag conflicts)
 
 readonly PI_IMAGE='pi-yolo'
+readonly PI_PROXY_IMAGE='pi-proxy'
+# readonly LANGS=(base)
 readonly LANGS=(base go php8.4 php8.5)
 
 function check_docker() {
@@ -27,14 +40,25 @@ Usage:
     pi [OPTIONS] -- [PI_ARGS...]
 
 Options:
-    -h|--help       Displays this help
-    -b|--build      Rebuild the Docker image before running
+    -h|--help                   Displays this help
+    -b|--build                  Rebuild the Docker image before running
+    -l|--lang <LANG>            Specify language target (default: base). Valid options: ${LANGS[*]}
+    -p|--proxy                  Start the proxy sidecar (restricted network access)
+    --allowed-domains <file>    Path to allowed-domains file
+                                (default: ~/.agents/proxy_allowed_domains.txt)
 
 Any unrecognised options and arguments are forwarded to the pi agent.
 Use '--' to pass flags to pi that would otherwise conflict with this script.
 EOF
 }
 
+function build_proxy_image() {
+    echo "Building Docker image: ${PI_PROXY_IMAGE} ..." >&2
+    docker buildx build \
+        --file "${script_home}/../proxy/Dockerfile" \
+        --tag "${PI_PROXY_IMAGE}:latest" \
+        "${script_home}/../proxy" >&2
+}
 
 function build_image() {
     echo "Building Docker image: ${PI_IMAGE} ..." >&2
@@ -46,8 +70,62 @@ function build_image() {
             --tag "${PI_IMAGE}:${target}" \
             "${script_home}" >&2
     done
+
+    build_proxy_image
 }
 
+
+function start_proxy() {
+    local proxy_allowed_domains_file="$1"
+    local network_name="$2"
+    local proxy_container="$3"
+
+    echo "Starting proxy sidecar container '${proxy_container}' on network '${network_name}'..." >&2
+    # Isolated internal network: pi container has no direct internet access.
+    docker network create --internal "${network_name}" >/dev/null
+
+    echo "Running proxy container '${proxy_container}'..." >&2
+    # Proxy runs on the default bridge (internet access) and the internal network.
+    docker run -d \
+        --rm \
+        --name "${proxy_container}" \
+        --volume "${proxy_allowed_domains_file}:/etc/tinyproxy/proxy_allowed_domains.txt:ro" \
+        "${PI_PROXY_IMAGE}:latest" >/dev/null
+
+    echo "Connecting proxy container '${proxy_container}' to network '${network_name}'..." >&2
+    # Connect proxy to the internal network so the pi container can reach it.
+    docker network connect "${network_name}" "${proxy_container}" >/dev/null
+
+    # Wait for tinyproxy to be ready (HEALTHCHECK in Dockerfile drives this).
+    local attempts=0 state
+    until [[ "$(docker inspect --format '{{.State.Health.Status}}' "${proxy_container}" 2>/dev/null)" == "healthy" ]]; do
+        attempts=$((attempts + 1))
+        if [[ $attempts -ge 30 ]]; then
+            echo "Error: proxy container failed to become healthy" >&2
+            docker logs "${proxy_container}" >&2 2>/dev/null || true
+            return 1
+        fi
+        state=$(docker inspect --format '{{.State.Status}}' "${proxy_container}" 2>/dev/null || echo "gone")
+        if [[ "$state" != "running" ]]; then
+            echo "Error: proxy container exited unexpectedly" >&2
+            echo "--- proxy logs ---" >&2
+            docker logs "${proxy_container}" >&2 2>/dev/null || true
+            return 1
+        fi
+        sleep 1
+    done
+
+    # Return the proxy's IP on the internal network.
+    docker inspect "${proxy_container}" \
+        --format "{{(index .NetworkSettings.Networks \"${network_name}\").IPAddress}}"
+}
+
+function stop_proxy() {
+    local network_name="$1"
+    local proxy_container="$2"
+    docker stop "${proxy_container}" >/dev/null 2>&1 || true
+    docker network rm "${network_name}" >/dev/null 2>&1 || true
+}
 
 function parse_params() {
     local param
@@ -64,6 +142,13 @@ function parse_params() {
                 ;;
             -l | --lang)
                 lang="$1"
+                shift
+                ;;
+            -p | --proxy)
+                proxy_flag=true
+                ;;
+            --allowed-domains)
+                proxy_allowed_domains_file="$1"
                 shift
                 ;;
             --)
@@ -87,15 +172,23 @@ function main() {
 
     build=false
     lang="base"
+    proxy_flag=false
+    proxy_allowed_domains_file=""
     pi_passthrough=()
 
     parse_params "$@"
 
     if [[ "${build}" == true ]]; then
         build_image
-    elif ! docker image inspect "${PI_IMAGE}" &>/dev/null; then
-        echo "Image '${PI_IMAGE}' not found. Building it first..." >&2
-        build_image
+    else
+        if ! docker image inspect "${PI_IMAGE}" &>/dev/null; then
+            echo "Image '${PI_IMAGE}' not found. Building it first..." >&2
+            build_image
+        fi
+        if [[ "${proxy_flag}" == true ]] && ! docker image inspect "${PI_PROXY_IMAGE}" &>/dev/null; then
+            echo "Image '${PI_PROXY_IMAGE}' not found. Building it first..." >&2
+            build_proxy_image
+        fi
     fi
 
     if [[ ! " ${LANGS[*]} " =~ " ${lang} " ]]; then
@@ -105,6 +198,27 @@ function main() {
 
     echo "Running pi in Docker container '${PI_IMAGE}' with language target '${lang}'..." >&2
 
+    # Optionally start proxy sidecar and isolated network.
+    local network_name="pi-net-$$"
+    local proxy_container="pi-proxy-$$"
+
+    if [[ "${proxy_flag}" == true ]]; then
+        if [[ -z "${proxy_allowed_domains_file}" ]]; then
+            proxy_allowed_domains_file="${HOME}/.agents/proxy_allowed_domains.txt"
+        fi
+        if [[ ! -f "${proxy_allowed_domains_file}" ]]; then
+            echo "Error: allowed-domains file not found: ${proxy_allowed_domains_file}" >&2
+            exit 1
+        fi
+        trap "stop_proxy '${network_name}' '${proxy_container}'" EXIT
+        echo "Starting proxy sidecar (allowed-domains: ${proxy_allowed_domains_file})..." >&2
+        local proxy_ip
+        proxy_ip=$(start_proxy "${proxy_allowed_domains_file}" "${network_name}" "${proxy_container}")
+        echo "Proxy ready at ${proxy_ip}:8888" >&2
+    else
+        echo "Proxy disabled (--proxy): unrestricted network access." >&2
+    fi
+    
     local docker_flags=(
         '--rm'
         '--user' "$(id -u):$(id -g)"
@@ -114,14 +228,30 @@ function main() {
         '--security-opt=no-new-privileges'
         '--ipc=private'
         '--mount' "type=bind,source=$(pwd),target=$(pwd)"
-        '--volume' "${HOME}/.pi/agent:/pi-agent"
+        '--volume' "${HOME}/.pi/agent:/home/piuser/.pi/agent"
+        '--volume' "${HOME}/dotfiles:${HOME}/dotfiles" # Used because .pi and .agent config is symlinked from here to user's home.
         '--volume' "${HOME}/.agents/skills:/home/piuser/.agents/skills"
+        '--volume' "${HOME}/.config/acli:/home/piuser/.config/acli"
+        '--volume' "${HOME}/.context-mode:/home/piuser/.pi/context-mode"
+        '--volume' "${script_home}/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
+        '--volume' "${script_home}/xdg-open:/usr/local/bin/xdg-open"
         '--workdir' "$(pwd)"
-        '--env' "PI_CODING_AGENT_DIR=/pi-agent"
+        '--env' "PI_TELEMETRY=${PI_TELEMETRY:-false}"
         '--env' "TERM=${TERM:-xterm-256color}"
         '--env' "COLORTERM=${COLORTERM:-truecolor}"
-        '--env' "PI_TELEMETRY=${PI_TELEMETRY:-false}"
     )
+    
+    if [[ "${proxy_flag}" == true ]]; then
+        docker_flags+=(
+            '--network' "${network_name}"
+            '--env' "HTTP_PROXY=http://${proxy_ip}:8888"
+            '--env' "HTTPS_PROXY=http://${proxy_ip}:8888"
+            '--env' "http_proxy=http://${proxy_ip}:8888"
+            '--env' "https_proxy=http://${proxy_ip}:8888"
+            '--env' "proxy=localhost,127.0.0.1"
+            '--env' "proxy=localhost,127.0.0.1"
+        )
+    fi
 
     # Forward pi-related env vars and API keys if set on the host.
     # Auth file (~/.pi/agent/auth.json) takes priority over these if present.
