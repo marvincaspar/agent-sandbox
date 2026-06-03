@@ -9,8 +9,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pi globally
+ARG PI_VERSION=0.78.0
 RUN echo "ignore-scripts=true" > ~/.npmrc \
-    && npm install -g "@earendil-works/pi-coding-agent@0.78.0"
+    && npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}"
 
 
 # Prepend extension binaries (host-mounted via /pi-agent). Security: binaries
@@ -27,7 +28,7 @@ RUN mkdir -p \
         /home/piuser \
         /pi-agent/npm-global \
     && chmod 1777 /home/piuser \
-    && chmod -R 1777 /pi-agent \
+    && chmod 1777 /pi-agent /pi-agent/npm-global \
     && chmod a+w /etc/passwd \
     && echo "prefix=/pi-agent/npm-global" > /home/piuser/.npmrc \
     && echo "min-release-age=7" >> /home/piuser/.npmrc \
@@ -39,15 +40,14 @@ WORKDIR /home/piuser
 
 # Install extensions
 # https://pi.dev/packages/@sherif-fanous/pi-catppuccin
-RUN pi install npm:@sherif-fanous/pi-catppuccin
 # https://pi.dev/packages/context-mode
-RUN pi install npm:context-mode
 # https://pi.dev/packages/pi-subagents
-RUN pi install npm:pi-subagents
+RUN pi install npm:@sherif-fanous/pi-catppuccin npm:context-mode npm:pi-subagents
 
-RUN curl -LO "https://acli.atlassian.com/linux/latest/acli_linux_arm64/acli"
-RUN chmod +x ./acli
-RUN mv ./acli /usr/local/bin/acli
+RUN ARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
+    && curl -fsSL "https://acli.atlassian.com/linux/latest/acli_linux_${ARCH}/acli" \
+        -o /usr/local/bin/acli \
+    && chmod +x /usr/local/bin/acli
 
 # Runtime installs must not reuse a cache populated during image build.
 # Keep the cache in a separate path that starts empty for the runtime UID.

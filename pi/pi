@@ -22,6 +22,9 @@ readonly PI_PROXY_IMAGE='pi-proxy'
 # readonly LANGS=(base)
 readonly LANGS=(base go php8.4 php8.5)
 
+SCRIPT_HOME="$(dirname "$(realpath "$0")")"
+readonly SCRIPT_HOME
+
 function check_docker() {
     if ! command -v docker &>/dev/null; then
         echo "Error: docker is not installed or not in PATH" >&2
@@ -55,9 +58,9 @@ EOF
 function build_proxy_image() {
     echo "Building Docker image: ${PI_PROXY_IMAGE} ..." >&2
     docker buildx build \
-        --file "${script_home}/../proxy/Dockerfile" \
+        --file "${SCRIPT_HOME}/../proxy/Dockerfile" \
         --tag "${PI_PROXY_IMAGE}:latest" \
-        "${script_home}/../proxy" >&2
+        "${SCRIPT_HOME}/../proxy" >&2
 }
 
 function build_image() {
@@ -65,10 +68,10 @@ function build_image() {
     for target in "${LANGS[@]}"; do
         echo "Building target stage: ${target} ..." >&2
         docker buildx build \
-            --file "${script_home}/Dockerfile" \
+            --file "${SCRIPT_HOME}/Dockerfile" \
             --target "${target}" \
             --tag "${PI_IMAGE}:${target}" \
-            "${script_home}" >&2
+            "${SCRIPT_HOME}" >&2
     done
 
     build_proxy_image
@@ -165,10 +168,7 @@ function parse_params() {
 
 
 function main() {
-    # Resolve script home correctly even when invoked via a symlink
     check_docker
-
-    script_home=$(dirname "$(realpath "$0")")
 
     build=false
     lang="base"
@@ -219,22 +219,33 @@ function main() {
         echo "Proxy disabled (--proxy): unrestricted network access." >&2
     fi
     
+    local current_user
+    current_user="$(id -u):$(id -g)"
+
     local docker_flags=(
         '--rm'
-        '--user' "$(id -u):$(id -g)"
+        '--user' "${current_user}"
         '--interactive'
         '--tty'
+        # Drop all Linux capabilities (NET_RAW, SYS_PTRACE, …) so a compromised
+        # process cannot manipulate the network stack, trace other processes, or
+        # perform privileged kernel operations.
         '--cap-drop=ALL'
+        # Prevent any exec inside the container from gaining capabilities via
+        # setuid/setgid binaries or file capability bits (e.g. sudo, ping).
         '--security-opt=no-new-privileges'
-        '--ipc=private'
+        # Disable access to the host's IPC namespace (shared memory, semaphores,
+        # message queues) so the container cannot communicate with or interfere
+        # with other containers or host processes via IPC primitives.
+        '--ipc=none'
         '--mount' "type=bind,source=$(pwd),target=$(pwd)"
         '--volume' "${HOME}/.pi/agent:/home/piuser/.pi/agent"
         '--volume' "${HOME}/dotfiles:${HOME}/dotfiles" # Used because .pi and .agent config is symlinked from here to user's home.
         '--volume' "${HOME}/.agents/skills:/home/piuser/.agents/skills"
         '--volume' "${HOME}/.config/acli:/home/piuser/.config/acli"
         '--volume' "${HOME}/.context-mode:/home/piuser/.pi/context-mode"
-        '--volume' "${script_home}/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
-        '--volume' "${script_home}/xdg-open:/usr/local/bin/xdg-open"
+        '--volume' "${SCRIPT_HOME}/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
+        '--volume' "${SCRIPT_HOME}/xdg-open:/usr/local/bin/xdg-open"
         '--workdir' "$(pwd)"
         '--env' "PI_TELEMETRY=${PI_TELEMETRY:-false}"
         '--env' "TERM=${TERM:-xterm-256color}"
@@ -248,8 +259,8 @@ function main() {
             '--env' "HTTPS_PROXY=http://${proxy_ip}:8888"
             '--env' "http_proxy=http://${proxy_ip}:8888"
             '--env' "https_proxy=http://${proxy_ip}:8888"
-            '--env' "proxy=localhost,127.0.0.1"
-            '--env' "proxy=localhost,127.0.0.1"
+            '--env' "NO_PROXY=localhost,127.0.0.1"
+            '--env' "no_proxy=localhost,127.0.0.1"
         )
     fi
 
