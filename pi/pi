@@ -19,8 +19,8 @@ set -euo pipefail
 
 readonly PI_IMAGE='pi-yolo'
 readonly PI_PROXY_IMAGE='pi-proxy'
-# readonly LANGS=(base)
-readonly LANGS=(base go php8.4 php8.5)
+readonly LANGS=(base)
+# readonly LANGS=(base go php8.4 php8.5)
 
 SCRIPT_HOME="$(dirname "$(realpath "$0")")"
 readonly SCRIPT_HOME
@@ -167,6 +167,13 @@ function parse_params() {
 }
 
 
+readonly URL_PIPE="/tmp/fake-browser.$$.log"
+
+function clean_pipe() {
+  echo "Removing named pipe ${URL_PIPE} ..."
+  rm -rf "${URL_PIPE}"
+}
+
 function main() {
     check_docker
 
@@ -210,15 +217,44 @@ function main() {
             echo "Error: allowed-domains file not found: ${proxy_allowed_domains_file}" >&2
             exit 1
         fi
-        trap "stop_proxy '${network_name}' '${proxy_container}'" EXIT
+        trap "stop_proxy '${network_name}' '${proxy_container}'" clean_pipe EXIT
         echo "Starting proxy sidecar (allowed-domains: ${proxy_allowed_domains_file})..." >&2
         local proxy_ip
         proxy_ip=$(start_proxy "${proxy_allowed_domains_file}" "${network_name}" "${proxy_container}")
         echo "Proxy ready at ${proxy_ip}:8888" >&2
     else
         echo "Proxy disabled (--proxy): unrestricted network access." >&2
+        trap clean_pipe EXIT
     fi
-    
+
+    clean_pipe
+
+    touch "${URL_PIPE}"
+
+    # tail -n 0: only follow lines written after this process starts (skip stale entries).
+    # Pipe gives FIFO semantics on the host side; the file is only used to cross
+    # the Docker VirtioFS boundary (VirtioFS does not support mounted FIFOs on macOS).
+    # WSL reports Linux via uname, so check it before the generic Linux case.
+    # Prefer wslview (wslu package); fall back to explorer.exe which is always available in WSL.
+    if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+        if command -v wslview &>/dev/null; then
+            _open_cmd='wslview'
+        else
+            _open_cmd='explorer.exe'
+        fi
+    else
+        case "$(uname -s)" in
+            Darwin) _open_cmd='open' ;;
+            Linux)  _open_cmd='xdg-open' ;;
+            *)      echo "Warning: unsupported OS, defaulting to xdg-open" >&2; _open_cmd='xdg-open' ;;
+        esac
+    fi
+
+    tail -n 0 -f "${URL_PIPE}" | while read -r URL; do
+        [[ -z "${URL}" ]] && continue
+        "${_open_cmd}" "${URL}"
+    done &
+
     local current_user
     current_user="$(id -u):$(id -g)"
 
@@ -240,18 +276,23 @@ function main() {
         '--ipc=none'
         '--mount' "type=bind,source=$(pwd),target=$(pwd)"
         '--volume' "${HOME}/.pi/agent:/home/piuser/.pi/agent"
-        '--volume' "${HOME}/dotfiles:${HOME}/dotfiles" # Used because .pi and .agent config is symlinked from here to user's home.
         '--volume' "${HOME}/.agents:/home/piuser/.agents"
         '--volume' "${HOME}/.config/acli:/home/piuser/.config/acli"
         '--volume' "${HOME}/.context-mode:/home/piuser/.pi/context-mode"
         '--volume' "${SCRIPT_HOME}/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
-        '--volume' "${SCRIPT_HOME}/xdg-open:/usr/local/bin/xdg-open"
+        '--volume' "${URL_PIPE}:/tmp/fake-browser.log"
         '--workdir' "$(pwd)"
         '--env' "PI_TELEMETRY=${PI_TELEMETRY:-false}"
         '--env' "TERM=${TERM:-xterm-256color}"
         '--env' "COLORTERM=${COLORTERM:-truecolor}"
     )
-    
+
+    if [[ "$(pwd)" != "${HOME}/dotfiles" ]]; then
+        docker_flags+=(
+            '--volume' "${HOME}/dotfiles:${HOME}/dotfiles" # Used because .pi and .agent config is symlinked from here to user's home.
+        )
+    fi
+
     if [[ "${proxy_flag}" == true ]]; then
         docker_flags+=(
             '--network' "${network_name}"
@@ -261,6 +302,10 @@ function main() {
             '--env' "https_proxy=http://${proxy_ip}:8888"
             '--env' "NO_PROXY=localhost,127.0.0.1"
             '--env' "no_proxy=localhost,127.0.0.1"
+        )
+    else
+        docker_flags+=(
+            '--network' 'host'
         )
     fi
 

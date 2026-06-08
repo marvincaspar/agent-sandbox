@@ -126,63 +126,29 @@ pi  # no proxy, unrestricted network
 
 ## Jira Auth Flow
 
-### Why OAuth doesn't work automatically in Docker
+### Prerequisites (macOS)
 
-`acli jira auth login --web` starts a temporary local HTTP server inside the container to receive the OAuth callback (e.g. `http://127.0.0.1:53197/callback`). After you authorize in the browser, Atlassian redirects your browser to that URL.
+Docker Desktop must have **Host Networking** enabled so the OAuth callback from your browser reaches the container:
 
-The problem: **your browser runs on the Mac host, not inside the container.** So `127.0.0.1:53197` in the browser refers to the Mac's loopback — not the container's. The callback never reaches the acli server and you get "This site can't be reached."
-
-Two approaches that don't fix this:
-- **`--network=host`** — on macOS, Docker Desktop runs inside a Linux VM. Host networking attaches to the VM's network, not the Mac's, so `127.0.0.1` still doesn't bridge correctly.
-- **Port mapping (`-p 53197:53197`)** — acli picks a random port on every run, so you can't pre-configure the right port in `docker run`.
-
-The workaround is to manually complete the callback from inside the container using `curl`.
+> Docker Desktop → Settings → Resources → Network → **Enable host networking**
 
 ---
 
 ### One-time setup: persist credentials
 
-Mount the acli config directory so you don't need to re-authenticate after every container restart:
-
-```
-~/.config/acli:/home/piuser/.config/acli
-```
-
-Credentials are stored in `/home/piuser/.config/acli/jira_config.yaml` (OAuth token) and related files in that directory.
+`~/.config/acli` is already mounted into the container, so credentials survive restarts.
 
 ---
 
 ### Auth workflow (only needed once, or after token expiry)
 
-You need **two terminals** exec'd into the container.
+Run login command inside the docker container:
 
-**Terminal 1** — start the OAuth flow:
 ```bash
 acli jira auth login --web
 ```
 
-The process starts a local callback server and writes the OAuth URL to `/tmp/oauth-url.txt`, then waits.
-
-**Terminal 2** — get the URL:
-```bash
-cat /tmp/oauth-url.txt
-```
-
-Open the printed URL in your **host browser** and complete the Atlassian OAuth flow. When it finishes, the browser will try to redirect to `http://127.0.0.1:<port>/callback?code=...&state=...` and show "This site can't be reached." **This is expected.** Copy the full URL from the browser address bar.
-
-**Terminal 2** — forward the callback manually into the container:
-```bash
-curl "http://127.0.0.1:<port>/callback?code=<CODE>&state=<STATE>"
-```
-
-Paste the full URL from the browser address bar (replace everything after `curl `).
-
-**Terminal 1** — select your site:
-```
-> https://your-org.atlassian.net
-```
-
-Pick the site and the auth process completes normally.
+The browser opens automatically. Complete the Atlassian OAuth flow — the callback redirects back to the browser and auth finishes without any manual steps.
 
 **Verify:**
 ```bash

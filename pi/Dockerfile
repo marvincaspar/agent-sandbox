@@ -9,7 +9,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pi globally
-ARG PI_VERSION=0.78.0
+ARG PI_VERSION=0.78.1
 RUN echo "ignore-scripts=true" > ~/.npmrc \
     && npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}"
 
@@ -54,6 +54,17 @@ RUN ARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
 # Runtime installs must not reuse a cache populated during image build.
 # Keep the cache in a separate path that starts empty for the runtime UID.
 ENV NPM_CONFIG_CACHE=/home/piuser/.npm-cache
+
+RUN cat >/usr/local/bin/fake-browser <<'EOF'
+#!/usr/bin/env bash
+echo "${1}" >>/tmp/fake-browser.log
+EOF
+
+RUN chmod +x /usr/local/bin/fake-browser
+
+RUN ln --force --symbolic /usr/local/bin/fake-browser /usr/local/bin/www-browser
+RUN ln --force --symbolic /usr/local/bin/fake-browser /usr/local/bin/x-www-browser
+RUN ln --force --symbolic /usr/local/bin/fake-browser /usr/local/bin/xdg-open
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
