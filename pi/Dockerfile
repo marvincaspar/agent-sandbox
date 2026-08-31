@@ -8,7 +8,7 @@ RUN apk add --no-cache \
         ca-certificates \
         git
 
-RUN curl -fsSL https://pi.dev/install.sh | sh
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4
 
 
 # Prepend extension binaries (host-mounted via /pi-agent). Security: binaries
@@ -38,17 +38,12 @@ ENV HOME=/home/piuser
 ENV NPM_CONFIG_CACHE=/tmp/npm-build-cache
 WORKDIR /home/piuser
 
-# Install extensions
-# https://pi.dev/packages/@sherif-fanous/pi-catppuccin
-RUN pi install npm:@sherif-fanous/pi-catppuccin
-# https://pi.dev/packages/pi-mcp-adapter
-RUN pi install npm:pi-mcp-adapter
+# Install global tools. Pi packages are declared by entrypoint.sh after the
+# host's ~/.pi/agent directory has been mounted.
 # https://pi.dev/packages/context-mode
-RUN npm install -g context-mode && pi install npm:context-mode
-# https://pi.dev/packages/pi-subagents
-RUN pi install npm:pi-subagents
-# https://pi.dev/packages/pi-powerline-footer
-RUN pi install npm:pi-powerline-footer
+RUN npm install -g context-mode
+# https://github.com/alibaba/open-code-review
+RUN npm install -g @alibaba-group/open-code-review
 
 # Make all extension files/dirs writable so any runtime user can upgrade packages.
 RUN chmod -R a+rwX /pi-agent/npm-global
