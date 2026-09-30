@@ -8,7 +8,7 @@ RUN apk add --no-cache \
         ca-certificates \
         git
 
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.99.1
 
 
 # Prepend extension binaries (host-mounted via /pi-agent). Security: binaries

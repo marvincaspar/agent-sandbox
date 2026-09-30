@@ -27,7 +27,6 @@ pi
 
 # Run with a specific language runtime
 pi --lang go
-pi --lang php8.4
 pi --lang php8.5
 
 # Rebuild all images and run
@@ -66,7 +65,6 @@ opencode
 
 # Run with a specific language runtime
 opencode --lang go
-opencode --lang php8.4
 opencode --lang php8.5
 
 # Rebuild all images and run
@@ -99,7 +97,6 @@ The Dockerfiles use a multi-stage build based on Chainguard's [`node:latest-dev`
 | -------- | ------------------------------------------------------- |
 | `base`   | Node.js + npm, agent binary, Git, curl, ca-certificates |
 | `go`     | `base` + Go 1.26                                        |
-| `php8.4` | `base` + PHP 8.4                                        |
 | `php8.5` | `base` + PHP 8.5                                        |
 
 ### Security model
@@ -162,41 +159,26 @@ opencode  # no proxy, unrestricted network
 
 ---
 
-## Jira Auth Flow
+## Jira MCP authentication
 
-### Prerequisites (macOS)
+Keep the Jira server in `~/.pi/agent/mcp.json` alongside any existing MCP servers:
 
-Docker Desktop must have **Host Networking** enabled so the OAuth callback from your browser reaches the container:
+```json
+{
+  "settings": { "oauthCredentialStore": "encrypted-file" },
+  "mcpServers": {
+    "jira": { "url": "https://mcp.atlassian.com/v1/mcp", "auth": "oauth" }
+  }
+}
+```
 
-> Docker Desktop → Settings → Resources → Network → **Enable host networking**
-
----
-
-### One-time setup: persist credentials
-
-`~/.config/acli` is already mounted into the container, so credentials survive restarts.
-
----
-
-### Auth workflow (only needed once, or after token expiry)
-
-Run login command inside the docker container:
+On the **host**, create the encryption key file once (do not overwrite an existing key):
 
 ```bash
-acli jira auth login --web
+mkdir -p "$HOME/.config"
+if [ ! -e "$HOME/.config/pi-mcp-oauth.key" ]; then
+  (umask 077; openssl rand -base64 32 > "$HOME/.config/pi-mcp-oauth.key")
+fi
 ```
 
-The browser opens automatically. Complete the Atlassian OAuth flow — the callback redirects back to the browser and auth finishes without any manual steps.
-
-**Verify:**
-
-```bash
-acli jira auth status
-```
-
-```
-✓ Authenticated
-  Site: your-org.atlassian.net
-  Email: your@email.com
-  Authentication Type: oauth
-```
+Run `pi` normally. If the file exists, the wrapper reads it and forwards `PI_MCP_ADAPTER_OAUTH_FILE_KEY` into the container automatically; no shell export is needed. Keep the key file private and backed up—replacing it makes saved OAuth credentials unreadable. Run `/mcp-auth jira` in Pi, approve access in the host browser, and paste the **full failed localhost redirect URL** into Pi's callback prompt. Do not paste it into chat: it contains a short-lived authorization code. No Docker host networking or API token is needed. Check the server in `/mcp`.

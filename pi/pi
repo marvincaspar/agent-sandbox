@@ -19,7 +19,7 @@ set -euo pipefail
 
 readonly PI_IMAGE='pi-yolo'
 readonly PI_PROXY_IMAGE='pi-proxy'
-readonly LANGS=(base go php8.4 php8.5)
+readonly LANGS=(base go php8.5)
 
 SCRIPT_HOME="$(dirname "$(realpath "$0")")"
 readonly SCRIPT_HOME
@@ -302,10 +302,6 @@ function main() {
             '--env' "NO_PROXY=localhost,127.0.0.1"
             '--env' "no_proxy=localhost,127.0.0.1"
         )
-    else
-        docker_flags+=(
-            '--network' 'host'
-        )
     fi
 
     # Forward pi-related env vars and API keys if set on the host.
@@ -326,6 +322,12 @@ function main() {
         [[ -n "${!var:-}" ]] && docker_flags+=('--env' "${var}=${!var}")
     done
 
+    # Keep the OAuth encryption key out of docker's command-line arguments.
+    if [[ -f "${HOME}/.config/pi-mcp-oauth.key" ]]; then
+        PI_MCP_ADAPTER_OAUTH_FILE_KEY="$(tr -d '\n' < "${HOME}/.config/pi-mcp-oauth.key")"
+        export PI_MCP_ADAPTER_OAUTH_FILE_KEY
+    fi
+    [[ -n "${PI_MCP_ADAPTER_OAUTH_FILE_KEY:-}" ]] && docker_flags+=('--env' 'PI_MCP_ADAPTER_OAUTH_FILE_KEY')
 
     local pi_args=(
         '--append-system-prompt'
