@@ -1,6 +1,6 @@
 # Getting newest sha256 digest for cgr.dev/chainguard/node:latest-dev on 2025-05-08:
 # $ docker buildx imagetools inspect cgr.dev/chainguard/node:latest-dev
-FROM cgr.dev/chainguard/node:latest-dev@sha256:f3efcc097ff61373465af43cd173256de01ea297e583ddead9be49efcff823bb AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:df7376d245b4a242d38e9289d265e6124a21217dea665001a0058960367fae46 AS base
 
 USER root
 RUN apk add --no-cache \
@@ -8,7 +8,7 @@ RUN apk add --no-cache \
         ca-certificates \
         git
 
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.99.1
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.5.2
 
 
 # Prepend extension binaries (host-mounted via /pi-agent). Security: binaries
@@ -28,7 +28,7 @@ RUN mkdir -p \
     && chmod 0777 /pi-agent /pi-agent/npm-global \
     && chmod a+w /etc/passwd \
     && echo "prefix=/pi-agent/npm-global" > /home/piuser/.npmrc \
-    && echo "min-release-age=7" >> /home/piuser/.npmrc \
+    && echo "min-release-age=3" >> /home/piuser/.npmrc \
     && echo "ignore-scripts=true" >> /home/piuser/.npmrc \
     && echo "allow-git=none" >> /home/piuser/.npmrc
 
@@ -42,8 +42,8 @@ WORKDIR /home/piuser
 # host's ~/.pi/agent directory has been mounted.
 # https://pi.dev/packages/context-mode
 RUN npm install -g context-mode
-# https://github.com/alibaba/open-code-review
-RUN npm install -g @alibaba-group/open-code-review
+# https://github.com/JuliusBrussee/caveman/blob/main/INSTALL.md#dev-containers-codespaces-remote-machines
+# RUN npx -y skills add JuliusBrussee/caveman --skill '*' -a pi -g -y
 
 # Make all extension files/dirs writable so any runtime user can upgrade packages.
 RUN chmod -R a+rwX /pi-agent/npm-global
@@ -73,20 +73,29 @@ RUN ln -f -s /usr/local/bin/fake-browser /usr/local/bin/xdg-open
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
-
-FROM base AS go
-
 USER root
 RUN apk add --no-cache go-1.26
+
+RUN apk add --no-cache python3 py3-pip
+
+RUN apk add --no-cache  \
+        mysql-client \
+        php-8.5 \
+        php-8.5-ctype \
+        php-8.5-dom \
+        php-8.5-iconv \
+        php-8.5-mbstring \
+        php-8.5-mysqlnd \
+        php-8.5-openssl \
+        php-8.5-pcntl \
+        php-8.5-phar \
+        php-8.5-pdo \
+        php-8.5-pdo_mysql \
+        php-8.5-xmlwriter
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 
 FROM base AS php8.4
 
 USER root
 RUN apk add --no-cache php-8.4
-
-
-FROM base AS php8.5
-
-USER root
-RUN apk add --no-cache php-8.5

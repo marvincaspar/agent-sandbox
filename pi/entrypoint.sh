@@ -14,11 +14,10 @@ fi
 # when it starts.
 required_packages=(
     'npm:@sherif-fanous/pi-catppuccin'
-    'npm:pi-mcp-adapter'
     'npm:context-mode'
     'npm:pi-subagents'
     'npm:pi-powerline-footer'
-    'npm:@caveman-ai/pi'
+    'git:github.com/jonjonrankin/pi-caveman'
     'git:github.com/DietrichGebert/ponytail'
 )
 settings_file="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}/settings.json"

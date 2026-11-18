@@ -42,6 +42,14 @@ pi --proxy --allowed-domains /path/to/allowed_domains.txt
 pi -- --help
 ```
 
+To use MySQL running on the host, rebuild the image with `pi --build`, then connect over TCP from inside Pi's container:
+
+```bash
+mysql --host=host.docker.internal --port=3306 --user=YOUR_USER --password
+```
+
+Enter the password at the prompt; don't put it on the command line. The host MySQL server must accept TCP connections from Docker, and the user must have permission to connect from the container. `localhost` inside Pi refers to the container, not the host.
+
 ---
 
 ### opencode

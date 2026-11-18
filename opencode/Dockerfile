@@ -1,6 +1,6 @@
 # Getting newest sha256 digest for cgr.dev/chainguard/node:latest-dev on 2025-05-08:
 # $ docker buildx imagetools inspect cgr.dev/chainguard/node:latest-dev
-FROM cgr.dev/chainguard/node:latest-dev@sha256:f3efcc097ff61373465af43cd173256de01ea297e583ddead9be49efcff823bb AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:df7376d245b4a242d38e9289d265e6124a21217dea665001a0058960367fae46 AS base
 
 USER root
 RUN apk add --no-cache \
@@ -48,13 +48,17 @@ USER root
 RUN apk add --no-cache go-1.26
 
 
-FROM base AS php8.4
-
-USER root
-RUN apk add --no-cache php-8.4
-
-
 FROM base AS php8.5
 
 USER root
-RUN apk add --no-cache php-8.5
+RUN apk add --no-cache \
+        php-8.5 \
+        php-8.5-ctype \
+        php-8.5-dom \
+        php-8.5-mbstring \
+        php-8.5-openssl \
+        php-8.5-phar \
+        php-8.5-pdo \
+        php-8.5-pdo_mysql \
+        php-8.5-xmlwriter
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer

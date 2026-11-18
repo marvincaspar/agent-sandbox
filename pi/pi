@@ -4,7 +4,7 @@ set -euo pipefail
 # Wrapper script to run the pi coding agent inside a hardened Docker container.
 #
 # Features:
-#   - Multi-language targets: base, go, php8.4, php8.5 (--lang)
+#   - Multi-language targets: base, go, php8.5 (--lang)
 #   - Optional image rebuild before running (--build)
 #   - Optional tinyproxy sidecar for restricted outbound network access (--proxy)
 #     with a configurable allowed-domains allowlist (--allowed-domains)
@@ -19,7 +19,7 @@ set -euo pipefail
 
 readonly PI_IMAGE='pi-yolo'
 readonly PI_PROXY_IMAGE='pi-proxy'
-readonly LANGS=(base go php8.5)
+readonly LANGS=(base)
 
 SCRIPT_HOME="$(dirname "$(realpath "$0")")"
 readonly SCRIPT_HOME
@@ -307,6 +307,8 @@ function main() {
     # Forward pi-related env vars and API keys if set on the host.
     # Auth file (~/.pi/agent/auth.json) takes priority over these if present.
     local pi_env_vars=(
+        PI_TIMING
+        PI_STARTUP_BENCHMARK
         PI_SKIP_VERSION_CHECK
         PI_CACHE_RETENTION
         PI_PACKAGE_DIR
