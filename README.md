@@ -40,6 +40,23 @@ pi --proxy --allowed-domains /path/to/allowed_domains.txt
 
 # Pass flags directly to the agent
 pi -- --help
+
+# Attach a host file outside the working checkout (mounted read-only)
+pi @/absolute/path/to/planning-input.json
+```
+
+Explicit absolute `@file` arguments outside the working checkout are bind-mounted
+read-only at the same path inside the container. Only the named files are exposed,
+not their parent directories. Files already under the checkout keep the existing
+workspace mount permissions. Relative attachments continue to resolve from the
+working directory. Host file permissions still apply; the container runs as your
+host UID. Temporary files remain the caller's responsibility to remove.
+
+This is a wrapper-only change; no image rebuild is needed. Ensure the `pi` command
+points to this updated wrapper. Test the mount arguments without Docker using:
+
+```sh
+python3 -m unittest discover -s pi -p 'test_*.py'
 ```
 
 To use MySQL running on the host, rebuild the image with `pi --build`, then connect over TCP from inside Pi's container:
