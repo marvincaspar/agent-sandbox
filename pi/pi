@@ -12,7 +12,8 @@ set -euo pipefail
 #   - Hardened container: capabilities dropped, no-new-privileges, private IPC
 #   - Mounts current working directory, ~/.pi/agent, dotai, skills, and
 #     ~/.config/acli read-write; entrypoint and xdg-open shim mounted read-only
-#   - Mounts explicit absolute @file attachments outside the checkout read-only
+#   - Mounts explicit absolute @file attachments and extension files read-only
+#   - Mounts the factory's single existing proposal output file read-write
 #   - Forwards common API keys and pi env-vars from the host environment
 #   - Passes a system prompt informing pi it is running as a non-root Docker user
 #   - Any unrecognised arguments are forwarded verbatim to pi (use '--' to avoid
@@ -287,22 +288,43 @@ function main() {
         '--env' "COLORTERM=${COLORTERM:-truecolor}"
     )
 
-    # Attach only explicitly supplied files, not their parent temporary directory.
-    # Keep checkout files on the existing workspace mount so their permissions do not change.
-    local arg attachment mounted_attachment already_mounted
+    # Expose only explicit files, never their parent directory. The factory export
+    # tool gets one writable transport file, not access to authoritative plan storage.
+    local arg attachment mounted_attachment already_mounted previous_arg="" mount_mode
     local attachment_mounts=()
     for arg in "${pi_passthrough[@]+"${pi_passthrough[@]}"}"; do
-        [[ "${arg}" == @/* ]] || continue
-        attachment="${arg#@}"
+        attachment=""
+        mount_mode=ro
+        case "${previous_arg}" in
+            --extension|-e) if [[ "${arg}" == /* ]]; then attachment="${arg}"; fi ;;
+            --factory-plan-output) attachment="${arg}"; mount_mode=rw ;;
+        esac
+        previous_arg="${arg}"
+        if [[ -z "${attachment}" && "${arg}" == @/* ]]; then
+            attachment="${arg#@}"
+        fi
+        [[ -n "${attachment}" ]] || continue
+        if [[ "${mount_mode}" == rw && ( "${attachment}" != /* || ! -f "${attachment}" || -L "${attachment}" ) ]]; then
+            echo "Error: --factory-plan-output requires an existing absolute regular file, not a symlink" >&2
+            exit 1
+        fi
         [[ -f "${attachment}" ]] || continue
+        # Checkout files already have the workspace mount's permissions.
         [[ "${attachment}" == "$(pwd)/"* ]] && continue
         already_mounted=false
         for mounted_attachment in "${attachment_mounts[@]+"${attachment_mounts[@]}"}"; do
-            [[ "${mounted_attachment}" == "${attachment}" ]] && already_mounted=true
+            if [[ "${mounted_attachment%:*}" == "${attachment}" ]]; then
+                if [[ "${mounted_attachment##*:}" != "${mount_mode}" ]]; then
+                    echo "Error: conflicting read/write mounts for an explicit input file" >&2
+                    exit 1
+                fi
+                already_mounted=true
+            fi
         done
         [[ "${already_mounted}" == true ]] && continue
-        docker_flags+=('--volume' "${attachment}:${attachment}:ro")
-        attachment_mounts+=("${attachment}")
+        printf 'Mounting explicit file (%s): %s\n' "${mount_mode}" "${attachment}" >&2
+        docker_flags+=('--volume' "${attachment}:${attachment}:${mount_mode}")
+        attachment_mounts+=("${attachment}:${mount_mode}")
     done
 
     if [[ "$(pwd)" != "${HOME}/dotai" ]]; then

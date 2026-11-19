@@ -52,7 +52,16 @@ workspace mount permissions. Relative attachments continue to resolve from the
 working directory. Host file permissions still apply; the container runs as your
 host UID. Temporary files remain the caller's responsibility to remove.
 
-This is a wrapper-only change; no image rebuild is needed. Ensure the `pi` command
+Explicit absolute `--extension /path/to/extension.ts` (or `-e`) files outside the
+checkout are also mounted read-only. For the factory's export extension,
+`--factory-plan-output /path/to/proposal.json` mounts only that existing regular
+file read-write at the same path. Symlink/missing output files and conflicting
+read/write mounts are rejected. The flag is still forwarded to Pi, where the trusted
+extension consumes it. No parent directory or authoritative plan store is exposed.
+The factory pre-creates and later removes this private transport file. This flag
+is intended for trusted callers, not model-selected paths.
+
+These are wrapper-only changes; no image rebuild is needed. Ensure the `pi` command
 points to this updated wrapper. Test the mount arguments without Docker using:
 
 ```sh

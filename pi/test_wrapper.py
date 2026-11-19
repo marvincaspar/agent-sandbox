@@ -43,7 +43,45 @@ if sys.argv[1] == "run":
                                 cwd=self.workspace, env=self.env,
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.last_stderr = result.stderr
         return json.loads(self.capture.read_text())
+
+    def test_factory_export_mounts_only_trusted_extension_and_output_file(self):
+        extension = self.root / "factory-plan.ts"
+        output = self.root / "proposal.json"
+        extension.write_text("export default function () {}")
+        output.write_text("")
+        args = self.invoke("--extension", str(extension), "--factory-plan-output", str(output))
+        self.assertIn(str(extension) + ":" + str(extension) + ":ro", args)
+        self.assertIn(str(output) + ":" + str(output) + ":rw", args)
+        self.assertNotIn(str(self.root) + ":" + str(self.root) + ":rw", args)
+        self.assertIn("--factory-plan-output", args)
+        self.assertIn("Mounting explicit file (ro): " + str(extension), self.last_stderr)
+        self.assertIn("Mounting explicit file (rw): " + str(output), self.last_stderr)
+
+    def test_export_destination_must_already_exist(self):
+        result = subprocess.run(["bash", str(WRAPPER), "--", "--factory-plan-output", str(self.root / "missing")],
+                                cwd=self.workspace, env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.capture.exists())
+
+    def test_unsafe_export_mounts_are_rejected(self):
+        output = self.root / "proposal.json"
+        output.write_text("")
+        alias = self.root / "alias.json"
+        alias.symlink_to(output)
+        for flags in [("--factory-plan-output", str(alias)),
+                      ("@" + str(output), "--factory-plan-output", str(output))]:
+            with self.subTest(flags=flags):
+                result = subprocess.run(["bash", str(WRAPPER), "--", *flags],
+                                        cwd=self.workspace, env=self.env,
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.capture.exists())
+
+    def test_relative_extension_keeps_normal_workspace_resolution(self):
+        args = self.invoke("--extension", "./local.ts")
+        self.assertIn("./local.ts", args)
 
     def test_launch_without_attachments(self):
         args = self.invoke()
