@@ -91,7 +91,10 @@ RUN apk add --no-cache  \
         php-8.5-phar \
         php-8.5-pdo \
         php-8.5-pdo_mysql \
+        php-8.5-pdo_mysql \
+        php-8.5-simplexml \
         php-8.5-xmlwriter
+
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 
