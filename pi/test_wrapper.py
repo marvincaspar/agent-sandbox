@@ -89,12 +89,27 @@ if sys.argv[1] == "run":
         result = subprocess.run(["bash", str(WRAPPER), "--factory-read-only", "--factory-repository", str(repository), "--", "--factory-planning-context", str(context), "--factory-handoff-output", str(output)], cwd=self.workspace, env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         args = json.loads(self.capture.read_text())
-        self.assertIn("type=bind,source=" + str(self.workspace) + ",target=" + str(self.workspace) + ",readonly", args)
+        self.assertIn("/factory-workspace:ro,mode=0555", args)
+        self.assertEqual(args[args.index("/factory-workspace:ro,mode=0555") - 1], "--tmpfs")
+        self.assertEqual(args[args.index("--workdir") + 1], "/factory-workspace")
+        self.assertFalse(any("source=" + str(self.workspace) in arg for arg in args))
         self.assertIn(str(repository) + ":" + str(repository) + ":ro", args)
         self.assertIn(str(context) + ":" + str(context) + ":ro", args)
         self.assertIn(str(output) + ":" + str(output) + ":rw", args)
         self.assertNotIn("--factory-read-only", args)
         self.assertNotIn("--factory-repository", args)
+
+    def test_planning_files_in_host_workdir_are_still_mounted_explicitly(self):
+        context = self.workspace / "context.json"
+        output = self.workspace / "handoff.json"
+        context.write_text("{}")
+        output.write_text("")
+        result = subprocess.run(["bash", str(WRAPPER), "--factory-read-only", "--", "--factory-planning-context", str(context), "--factory-handoff-output", str(output)], cwd=self.workspace, env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(self.capture.read_text())
+        self.assertIn(str(context) + ":" + str(context) + ":ro", args)
+        self.assertIn(str(output) + ":" + str(output) + ":rw", args)
+        self.assertFalse(any("source=" + str(self.workspace) in arg for arg in args))
 
     def test_relative_extension_keeps_normal_workspace_resolution(self):
         args = self.invoke("--extension", "./local.ts")
@@ -103,6 +118,9 @@ if sys.argv[1] == "run":
     def test_launch_without_attachments(self):
         args = self.invoke()
         self.assertIn("pi-yolo:base", args)
+        self.assertIn("type=bind,source=" + str(self.workspace) + ",target=" + str(self.workspace), args)
+        self.assertEqual(args[args.index("--workdir") + 1], str(self.workspace))
+        self.assertNotIn("--tmpfs", args)
 
     def test_external_attachment_is_mounted_readonly_at_same_path(self):
         attachment = self.root / "planning input.json"

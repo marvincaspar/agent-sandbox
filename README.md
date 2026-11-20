@@ -61,6 +61,14 @@ extension consumes it. No parent directory or authoritative plan store is expose
 The factory pre-creates and later removes this private transport file. This flag
 is intended for trusted callers, not model-selected paths.
 
+Factory planning sessions use `--factory-read-only` before the `--` separator.
+In this mode, the container working directory is an empty read-only tmpfs at
+`/factory-workspace`, not a bind mount of the host working directory. Repeated
+`--factory-repository /absolute/path` options expose repository directories
+read-only. Context, extension, and handoff files remain explicit file mounts,
+including files under the host working directory. Normal sessions keep their
+existing writable checkout bind mount.
+
 These are wrapper-only changes; no image rebuild is needed. Ensure the `pi` command
 points to this updated wrapper. Test the mount arguments without Docker using:
 

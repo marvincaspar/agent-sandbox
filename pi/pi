@@ -269,8 +269,13 @@ function main() {
     local current_user
     current_user="$(id -u):$(id -g)"
 
-    local workspace_mount="type=bind,source=$(pwd),target=$(pwd)"
-    [[ "${factory_read_only}" == true ]] && workspace_mount+=",readonly"
+    local container_workdir="$(pwd)"
+    local workspace_flags=('--mount' "type=bind,source=$(pwd),target=$(pwd)")
+    if [[ "${factory_read_only}" == true ]]; then
+        # Planning needs an empty working directory, not a bind of the new host run directory.
+        container_workdir="/factory-workspace"
+        workspace_flags=('--tmpfs' "${container_workdir}:ro,mode=0555")
+    fi
     local docker_flags=(
         '--rm'
         '--user' "${current_user}"
@@ -287,14 +292,14 @@ function main() {
         # message queues) so the container cannot communicate with or interfere
         # with other containers or host processes via IPC primitives.
         '--ipc=none'
-        '--mount' "${workspace_mount}"
+        "${workspace_flags[@]}"
         '--volume' "${HOME}/.pi/agent:/home/piuser/.pi/agent"
         '--volume' "${HOME}/.agents:/home/piuser/.agents"
         '--volume' "${HOME}/.config/acli:/home/piuser/.config/acli"
         '--volume' "${HOME}/.context-mode:/home/piuser/.pi/context-mode"
         '--volume' "${SCRIPT_HOME}/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro"
         '--volume' "${URL_PIPE}:/tmp/fake-browser.log"
-        '--workdir' "$(pwd)"
+        '--workdir' "${container_workdir}"
         '--env' "PI_TELEMETRY=${PI_TELEMETRY:-false}"
         '--env' "TERM=${TERM:-xterm-256color}"
         '--env' "COLORTERM=${COLORTERM:-truecolor}"
@@ -331,8 +336,8 @@ function main() {
             exit 1
         fi
         [[ -f "${attachment}" ]] || continue
-        # Checkout files already have the workspace mount's permissions.
-        [[ "${attachment}" == "$(pwd)/"* ]] && continue
+        # Only normal sessions bind the host working directory.
+        [[ "${factory_read_only}" != true && "${attachment}" == "$(pwd)/"* ]] && continue
         already_mounted=false
         for mounted_attachment in "${attachment_mounts[@]+"${attachment_mounts[@]}"}"; do
             if [[ "${mounted_attachment%:*}" == "${attachment}" ]]; then
