@@ -155,6 +155,14 @@ function parse_params() {
                 proxy_allowed_domains_file="$1"
                 shift
                 ;;
+            --factory-read-only)
+                factory_read_only=true
+                ;;
+            --factory-repository)
+                [[ $# -gt 0 ]] || { echo "Error: missing repository path" >&2; exit 1; }
+                factory_repositories+=("$1")
+                shift
+                ;;
             --)
                 # Everything after -- is forwarded verbatim to pi
                 pi_passthrough+=("$@")
@@ -183,6 +191,8 @@ function main() {
     proxy_flag=false
     proxy_allowed_domains_file=""
     pi_passthrough=()
+    factory_read_only=false
+    factory_repositories=()
 
     parse_params "$@"
 
@@ -259,6 +269,8 @@ function main() {
     local current_user
     current_user="$(id -u):$(id -g)"
 
+    local workspace_mount="type=bind,source=$(pwd),target=$(pwd)"
+    [[ "${factory_read_only}" == true ]] && workspace_mount+=",readonly"
     local docker_flags=(
         '--rm'
         '--user' "${current_user}"
@@ -275,7 +287,7 @@ function main() {
         # message queues) so the container cannot communicate with or interfere
         # with other containers or host processes via IPC primitives.
         '--ipc=none'
-        '--mount' "type=bind,source=$(pwd),target=$(pwd)"
+        '--mount' "${workspace_mount}"
         '--volume' "${HOME}/.pi/agent:/home/piuser/.pi/agent"
         '--volume' "${HOME}/.agents:/home/piuser/.agents"
         '--volume' "${HOME}/.config/acli:/home/piuser/.config/acli"
@@ -288,6 +300,15 @@ function main() {
         '--env' "COLORTERM=${COLORTERM:-truecolor}"
     )
 
+    local repository
+    for repository in "${factory_repositories[@]+"${factory_repositories[@]}"}"; do
+        if [[ "${factory_read_only}" != true || "${repository}" != /* || ! -d "${repository}" || -L "${repository}" || "${repository}" == *[:,]* ]]; then
+            echo "Error: factory repositories require read-only mode and absolute directory paths without mount delimiters" >&2
+            exit 1
+        fi
+        docker_flags+=('--volume' "${repository}:${repository}:ro")
+    done
+
     # Expose only explicit files, never their parent directory. The factory export
     # tool gets one writable transport file, not access to authoritative plan storage.
     local arg attachment mounted_attachment already_mounted previous_arg="" mount_mode
@@ -297,7 +318,8 @@ function main() {
         mount_mode=ro
         case "${previous_arg}" in
             --extension|-e) if [[ "${arg}" == /* ]]; then attachment="${arg}"; fi ;;
-            --factory-plan-output) attachment="${arg}"; mount_mode=rw ;;
+            --factory-plan-output|--factory-handoff-output) attachment="${arg}"; mount_mode=rw ;;
+            --factory-planning-context) attachment="${arg}" ;;
         esac
         previous_arg="${arg}"
         if [[ -z "${attachment}" && "${arg}" == @/* ]]; then
@@ -305,7 +327,7 @@ function main() {
         fi
         [[ -n "${attachment}" ]] || continue
         if [[ "${mount_mode}" == rw && ( "${attachment}" != /* || ! -f "${attachment}" || -L "${attachment}" ) ]]; then
-            echo "Error: --factory-plan-output requires an existing absolute regular file, not a symlink" >&2
+            echo "Error: factory output requires an existing absolute regular file, not a symlink" >&2
             exit 1
         fi
         [[ -f "${attachment}" ]] || continue
