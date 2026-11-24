@@ -6,9 +6,10 @@ USER root
 RUN apk add --no-cache \
         curl \
         ca-certificates \
-        git
+        git \
+        gh
 
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.5.2
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.6.0
 
 
 # Prepend extension binaries (host-mounted via /pi-agent). Security: binaries
