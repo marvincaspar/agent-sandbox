@@ -176,6 +176,65 @@ function parse_params() {
 }
 
 
+function configure_git_signing() {
+    if [[ "${factory_read_only}" == true || "$(git config --type=bool --get commit.gpgsign || true)" != true ]]; then
+        return
+    fi
+    if [[ "$(git config --get gpg.format || true)" != ssh ]]; then
+        echo "Error: the sandbox supports SSH signing only; set gpg.format=ssh on the host" >&2
+        return 1
+    fi
+
+    local signing_key key_type signing_name signing_email agent_socket agent_gid
+    signing_key="$(git config --path --get user.signingkey || true)"
+    if [[ "${signing_key}" != /* || ! -f "${signing_key}" || "${signing_key}" == *,* ]]; then
+        echo "Error: user.signingkey must name an existing public signing key without mount delimiters" >&2
+        return 1
+    fi
+    read -r key_type _ < "${signing_key}" || true
+    case "${key_type}" in
+        ssh-*|ecdsa-sha2-*|sk-*) ;;
+        *) echo "Error: user.signingkey must be a public signing key; private keys are never mounted" >&2; return 1 ;;
+    esac
+    signing_name="$(git config --get user.name || true)"
+    signing_email="$(git config --get user.email || true)"
+    if [[ -z "${signing_name}" || -z "${signing_email}" ]]; then
+        echo "Error: SSH signing requires user.name and user.email on the host" >&2
+        return 1
+    fi
+    if [[ -z "${SSH_AUTH_SOCK:-}" || ! -S "${SSH_AUTH_SOCK}" ]]; then
+        echo "Error: SSH signing requires SSH_AUTH_SOCK to point to a running host SSH agent" >&2
+        return 1
+    fi
+    case "$(uname -s)" in
+        # Docker Desktop's bridge socket is root:root, mode 0660 inside the VM.
+        Darwin) agent_socket="/run/host-services/ssh-auth.sock"; agent_gid=0 ;;
+        Linux) agent_socket="${SSH_AUTH_SOCK}"; agent_gid="$(stat -Lc '%g' "${agent_socket}")" ;;
+        *) echo "Error: SSH agent forwarding is supported on macOS Docker Desktop and Linux" >&2; return 1 ;;
+    esac
+    if [[ "${agent_socket}" == *,* ]]; then
+        echo "Error: SSH_AUTH_SOCK must not contain mount delimiters" >&2
+        return 1
+    fi
+    git_signing_flags+=(
+        --mount "type=bind,source=${agent_socket},target=/run/ssh-agent"
+        --group-add "${agent_gid}"
+        --env SSH_AUTH_SOCK=/run/ssh-agent
+        --mount "type=bind,source=${signing_key},target=/run/git-signing-key.pub,readonly"
+        --env GIT_CONFIG_COUNT=5
+        --env GIT_CONFIG_KEY_0=user.name
+        --env "GIT_CONFIG_VALUE_0=${signing_name}"
+        --env GIT_CONFIG_KEY_1=user.email
+        --env "GIT_CONFIG_VALUE_1=${signing_email}"
+        --env GIT_CONFIG_KEY_2=gpg.format
+        --env GIT_CONFIG_VALUE_2=ssh
+        --env GIT_CONFIG_KEY_3=user.signingkey
+        --env GIT_CONFIG_VALUE_3=/run/git-signing-key.pub
+        --env GIT_CONFIG_KEY_4=commit.gpgsign
+        --env GIT_CONFIG_VALUE_4=true
+    )
+}
+
 readonly URL_PIPE="/tmp/fake-browser.$$.log"
 
 function clean_pipe() {
@@ -195,6 +254,9 @@ function main() {
     factory_repositories=()
 
     parse_params "$@"
+
+    local git_signing_flags=()
+    configure_git_signing
 
     if [[ "${build}" == true ]]; then
         build_image
@@ -293,6 +355,7 @@ function main() {
         # with other containers or host processes via IPC primitives.
         '--ipc=none'
         "${workspace_flags[@]}"
+        "${git_signing_flags[@]+"${git_signing_flags[@]}"}"
         '--volume' "${HOME}/.pi/agent:/home/piuser/.pi/agent"
         '--volume' "${HOME}/.agents:/home/piuser/.agents"
         '--volume' "${HOME}/.config/acli:/home/piuser/.config/acli"

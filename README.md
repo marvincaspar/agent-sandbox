@@ -76,6 +76,48 @@ points to this updated wrapper. Test the mount arguments without Docker using:
 python3 -m unittest discover -s pi -p 'test_*.py'
 ```
 
+#### Signed commits
+
+Normal Pi sessions inherit the host's SSH commit-signing policy when
+`commit.gpgsign=true` and `gpg.format=ssh`. The wrapper forwards the host identity
+and signing settings, mounts only the public key named by `user.signingkey`
+read-only, and forwards the SSH-agent socket. The private key and the full host
+Git configuration are not mounted. Factory read-only planning sessions receive
+neither the signing key nor the agent socket.
+
+Load the corresponding private key into your host agent and rebuild the image
+once to install `ssh-keygen`:
+
+```sh
+ssh-add ~/.ssh/git_signing_key
+pi --build
+```
+
+On macOS this uses Docker Desktop's `/run/host-services/ssh-auth.sock` bridge;
+on Linux it binds the socket named by `SSH_AUTH_SOCK`. Other Docker runtimes on
+macOS need their own agent bridge and are not supported by this configuration.
+The host must have a running agent. Missing public keys or sockets, private key
+files, and unsupported signing formats stop the launch instead of silently
+falling back to unsigned commits. The matching key must be loaded into the
+forwarded agent; otherwise signing fails when Git commits. The container's
+non-root UID is preserved. The wrapper adds only the socket-access supplementary
+group: GID 0 for Docker Desktop's root-owned bridge, or the socket's actual GID
+on Linux. This grants access to the agent without running the container as root
+or making the socket world-writable. Existing containers must be restarted to
+receive the supplementary group.
+
+For GitHub's **Verified** badge, register the public key in GitHub Settings →
+SSH and GPG keys as a **Signing Key**, and use a verified email on that account.
+`allowedSignersFile` is needed for local SSH-signature verification, not for
+GitHub verification. Existing unsigned commits do not change; signing old
+commits rewrites their hashes.
+
+**Security:** any process in the container can request signatures from the
+forwarded agent, including with other keys loaded into it. Only enable signing
+for trusted sessions; prefer a dedicated signing-only key/agent. Read-only socket
+mounts do not prevent signing requests. This affects the Pi wrapper here, not
+Bosun's separate planning wrapper or the OpenCode wrapper.
+
 To use MySQL running on the host, rebuild the image with `pi --build`, then connect over TCP from inside Pi's container:
 
 ```bash

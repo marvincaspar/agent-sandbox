@@ -11,7 +11,7 @@ import unittest
 WRAPPER = Path(__file__).with_name("pi").resolve()
 
 
-class AttachmentMountTests(unittest.TestCase):
+class WrapperTestCase(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -30,6 +30,7 @@ if sys.argv[1] == "run":
         # Avoid leaving the wrapper's browser bridge following a log in tests.
         self.executable("tail", "#!/bin/sh\nexit 0\n")
         self.env = {"HOME": str(self.root / "home"),
+                    "GIT_CONFIG_NOSYSTEM": "1",
                     "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
                     "DOCKER_ARGS_FILE": str(self.capture)}
 
@@ -46,6 +47,8 @@ if sys.argv[1] == "run":
         self.last_stderr = result.stderr
         return json.loads(self.capture.read_text())
 
+
+class AttachmentMountTests(WrapperTestCase):
     def test_factory_export_mounts_only_trusted_extension_and_output_file(self):
         extension = self.root / "factory-plan.ts"
         output = self.root / "proposal.json"
@@ -117,6 +120,7 @@ if sys.argv[1] == "run":
 
     def test_launch_without_attachments(self):
         args = self.invoke()
+        self.assertNotIn("", args)
         self.assertIn("pi-yolo:base", args)
         self.assertIn("type=bind,source=" + str(self.workspace) + ",target=" + str(self.workspace), args)
         self.assertEqual(args[args.index("--workdir") + 1], str(self.workspace))

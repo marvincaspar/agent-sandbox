@@ -6,8 +6,7 @@ USER root
 RUN apk add --no-cache \
         curl \
         ca-certificates \
-        git \
-        gh
+        git
 
 # The install script hardcodes INSTALL_DIR=$HOME/.opencode/bin with no override.
 # During the build HOME=/root, so we move the binary to /usr/local/bin afterwards.
